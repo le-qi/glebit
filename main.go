@@ -7,6 +7,7 @@ import (
 	"github.com/hybridgroup/gobot"
 	"github.com/hybridgroup/gobot/api"
 	"github.com/hybridgroup/gobot/platforms/gpio"
+	"github.com/hybridgroup/gobot/platforms/i2c"
 	"github.com/hybridgroup/gobot/platforms/intel-iot/edison"
 )
 
@@ -20,6 +21,7 @@ var rotary *gpio.GroveRotaryDriver
 var sensor *gpio.GroveTemperatureSensorDriver
 var sound *gpio.GroveSoundSensorDriver
 var light *gpio.GroveLightSensorDriver
+var lcd *i2c.GroveLcdDriver
 
 func DetectSound(level int) {
 	if level >= 400 {
@@ -91,6 +93,9 @@ func main() {
 	sensor = gpio.NewGroveTemperatureSensorDriver(board, "sensor", "1")
 	sound = gpio.NewGroveSoundSensorDriver(board, "sound", "2")
 	light = gpio.NewGroveLightSensorDriver(board, "light", "3")
+
+	// lcd
+	lcd = i2c.NewGroveLcdDriver(board, "lcd")
 
 	work := func() {
 		Reset()
