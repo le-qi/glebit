@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"math"
+	"math/rand"
 	"time"
 
 	"github.com/hybridgroup/gobot"
@@ -12,9 +14,6 @@ import (
 )
 
 var button *gpio.GroveButtonDriver
-var blue *gpio.GroveLedDriver
-var green *gpio.GroveLedDriver
-var red *gpio.GroveLedDriver
 var buzzer *gpio.GroveBuzzerDriver
 var touch *gpio.GroveTouchDriver
 var rotary *gpio.GroveRotaryDriver
@@ -23,54 +22,13 @@ var sound *gpio.GroveSoundSensorDriver
 var light *gpio.GroveLightSensorDriver
 var lcd *i2c.GroveLcdDriver
 
-func DetectSound(level int) {
-	if level >= 400 {
-		fmt.Println("Sound detected")
-		TurnOff()
-		blue.On()
-		<-time.After(1 * time.Second)
-		Reset()
-	}
-}
-
-func DetectLight(level int) {
-	if level >= 400 {
-		fmt.Println("Light detected")
-		TurnOff()
-		blue.On()
-		<-time.After(1 * time.Second)
-		Reset()
-	}
-}
-
-func CheckFireAlarm() {
-	temp := sensor.Temperature()
-	fmt.Println("Current temperature:", temp)
-	if temp >= 40 {
-		TurnOff()
-		red.On()
-		buzzer.Tone(gpio.F4, gpio.Half)
-	}
-}
-
-func Doorbell() {
-	TurnOff()
-	blue.On()
-	buzzer.Tone(gpio.C4, gpio.Quarter)
-	<-time.After(1 * time.Second)
-	Reset()
-}
-
-func TurnOff() {
-	blue.Off()
-	green.Off()
-}
-
-func Reset() {
-	TurnOff()
-	fmt.Println("Airlock ready.")
-	green.On()
-}
+var commands []string
+var passing bool
+var state int
+var gameOn bool
+var twist int
+var heat int
+var timer int
 
 func main() {
 	gbot := gobot.NewGobot()
@@ -82,58 +40,101 @@ func main() {
 	board := edison.NewEdisonAdaptor("edison")
 
 	button = gpio.NewGroveButtonDriver(board, "button", "2")
-	blue = gpio.NewGroveLedDriver(board, "blue", "3")
-	green = gpio.NewGroveLedDriver(board, "green", "4")
-	red = gpio.NewGroveLedDriver(board, "red", "5")
 	buzzer = gpio.NewGroveBuzzerDriver(board, "buzzer", "7")
 	touch = gpio.NewGroveTouchDriver(board, "touch", "8")
 
 	// analog
 	rotary = gpio.NewGroveRotaryDriver(board, "rotary", "0")
-	sensor = gpio.NewGroveTemperatureSensorDriver(board, "sensor", "1")
+	light = gpio.NewGroveLightSensorDriver(board, "light", "1")
 	sound = gpio.NewGroveSoundSensorDriver(board, "sound", "2")
-	light = gpio.NewGroveLightSensorDriver(board, "light", "3")
+	sensor = gpio.NewGroveTemperatureSensorDriver(board, "sensor", "3")
 
 	// lcd
 	lcd = i2c.NewGroveLcdDriver(board, "lcd")
+	commands = []string{"Switch It!", "Cover It!", "Twist It!", "Press It!", "Scream It!"}
 
 	work := func() {
-		Reset()
+
+		lcd.SetRGB(255, 255, 0)
+		lcd.Write("Welcome to Gleb It!")
+		passing = true
+		timer = 2000
+		gameOn = true
 
 		gobot.On(button.Event(gpio.Push), func(data interface{}) {
-			TurnOff()
-			fmt.Println("On!")
-			blue.On()
-		})
-
-		gobot.On(button.Event(gpio.Release), func(data interface{}) {
-			Reset()
+			if !gameOn {
+				lcd.Clear()
+				lcd.Write("Welcome to")
+				lcd.SetPosition(16)
+				lcd.Write("Gleb It!")
+				passing = true
+				timer = 2000
+				gameOn = true
+				state = -1
+			}
+			if state == 0 {
+				fmt.Println("Switched!")
+				passing = true
+			}
 		})
 
 		gobot.On(touch.Event(gpio.Push), func(data interface{}) {
-			Doorbell()
-		})
-
-		gobot.On(rotary.Event("data"), func(data interface{}) {
-			fmt.Println("rotary", data)
-		})
-
-		gobot.On(sound.Event("data"), func(data interface{}) {
-			DetectSound(data.(int))
+			if state == 3 {
+				fmt.Println("Pressed!")
+				passing = true
+			}
 		})
 
 		gobot.On(light.Event("data"), func(data interface{}) {
-			DetectLight(data.(int))
+			if state == 1 && data.(int) <= 60 {
+				fmt.Println("Covered!")
+				passing = true
+			}
 		})
 
-		gobot.Every(1*time.Second, func() {
-			CheckFireAlarm()
+		gobot.On(sound.Event("data"), func(data interface{}) {
+			if state == 4 && data.(int) >= 500 {
+				fmt.Println("Screamed!")
+				passing = true
+			}
+		})
+
+		gobot.Every(time.Duration(timer)*time.Millisecond, func() {
+			if gameOn {
+				if state == 2 {
+					newTwist, _ := rotary.Read()
+					passing = math.Abs(float64(newTwist-twist)) > 50
+				}
+				fmt.Println(passing)
+				if !passing {
+					buzzer.Tone(gpio.F4, 1)
+					gameOn = false
+					lcd.Clear()
+					lcd.Write("Sorry! Try again!")
+					return
+				}
+				passing = false
+				lcd.Clear()
+				buzzer.Tone(gpio.F4, 0.01)
+				num := rand.Intn(len(commands))
+				// num := 4
+				state = num
+				lcd.Write(commands[num])
+				if state == 2 {
+					twist, _ = rotary.Read()
+				}
+			} else {
+				lcd.Clear()
+				lcd.Write("Welcome to")
+				lcd.SetPosition(16)
+				lcd.Write("Gleb It!")
+			}
 		})
 	}
 
-	robot := gobot.NewRobot("airlock",
+	robot := gobot.NewRobot("glebit",
 		[]gobot.Connection{board},
-		[]gobot.Device{button, blue, green, red, buzzer, touch, rotary, sensor, sound, light},
+		[]gobot.Device{button, buzzer, touch, rotary, sensor, sound, light, lcd},
 		work,
 	)
 
